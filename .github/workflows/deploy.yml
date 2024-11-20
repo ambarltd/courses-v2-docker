@@ -7,11 +7,24 @@ on:
 jobs:
   php-push:
     name: Push Docker image to Docker Hub
-    runs-on: ubuntu-latest
+    runs-on:
+      group: ${{ matrix.runner_group }}
     permissions:
       packages: write
       contents: read
       attestations: write
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+        include:
+          - platform: linux/amd64
+            runner_group: large_amd64
+            platform_tag: amd64
+          - platform: linux/arm64
+            runner_group: large_arm64
+            platform_tag: arm64
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -34,8 +47,33 @@ jobs:
         with:
           context: ./php/
           file: ./php/Dockerfile
+          pull: false
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ambarltd/courses-v2-php:${{ github.event.release.tag_name }}-${{ matrix.platform_tag }}
           labels: ${{ steps.meta.outputs.labels }}
+  php-merge_manifests:
+    name: Merge manifests to prevent overrides on Docker Hub
+    runs-on: ubuntu-20.04
+    needs: [php-push]
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ambarltd
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-
+      - name: Merge and push manifests
+        run: |
+          docker manifest create ambarltd/courses-v2-php:${{ github.event.release.tag_name }} \
+            --amend ambarltd/courses-v2-php:${{ github.event.release.tag_name }}-amd64 \
+            --amend ambarltd/courses-v2-php:${{ github.event.release.tag_name }}-arm64
+          docker manifest push ambarltd/courses-v2-php:${{ github.event.release.tag_name }}
+          
+          docker manifest create ambarltd/courses-v2-php:latest \
+            --amend ambarltd/courses-v2-php:${{ github.event.release.tag_name }}-amd64 \
+            --amend ambarltd/courses-v2-php:${{ github.event.release.tag_name }}-arm64
+          docker manifest push ambarltd/courses-v2-php:latest
